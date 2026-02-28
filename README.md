@@ -1,37 +1,13 @@
-name: Deploy to GitHub Pages
+# AI Prompt Lab - Environment Variables
+# Copy this file to .env and add your API keys
 
-on:
-  push:
-    branches: [ main, master ]
-  workflow_dispatch:
+# Google Gemini API Key (FREE)
+# Get yours at: https://makersuite.google.com/app/apikey
+GEMINI_API_KEY=your_gemini_api_key_here
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
+# OpenAI API Key (Paid)
+# Get yours at: https://platform.openai.com/api-keys
+OPENAI_API_KEY=your_openai_api_key_here
 
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
-
-jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-      
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: '.'
-      
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+# Server Port (optional, defaults to 3000)
+PORT=3000
