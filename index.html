@@ -1555,6 +1555,7 @@
         
         @keyframes spin { to { transform: rotate(360deg); } }
     </style>
+<base target="_blank">
 </head>
 <body>
     <div class="notification" id="notification">Done!</div>
@@ -1570,6 +1571,7 @@
             <button class="icon-btn" onclick="requestShakePermission()"><span>📳</span> Shake: <span id="shake-status">OFF</span></button>
             <button class="icon-btn" onclick="toggleTheme()"><span id="theme-icon">🌙</span> <span id="theme-text">Dark</span></button>
             <button class="icon-btn" onclick="showShortcuts()"><span>⌨️</span> Shortcuts</button>
+            <button class="icon-btn" onclick="showBackendModal()" id="backend-btn" title="Configure AI Backend"><span>🔌</span> AI</button>
             <button class="icon-btn" onclick="clearAllData()"><span>🗑️</span> Clear</button>
         </div>
         <div class="tab-container">
@@ -2434,6 +2436,52 @@
         </div>
     </div>
 
+    <!-- Backend Settings Modal -->
+    <div class="modal-overlay" id="backendModal" onclick="closeModalOnOverlay(event)">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-title">🔌 AI Backend Settings</span>
+                <button class="close-btn" onclick="showBackendModal()">×</button>
+            </div>
+            <div style="margin-bottom: 20px;">
+                <p style="color: var(--silver-bright); font-size: 0.9rem; margin-bottom: 15px;">
+                    Connect to a backend server for AI-powered generation. 
+                    <a href="https://github.com/yourusername/prompt-lab#-connect-to-ai-backend-setup" target="_blank" style="color: var(--neon-cyan);">Setup Guide →</a>
+                </p>
+                
+                <div class="input-group" style="margin-bottom: 15px;">
+                    <label class="input-label">Backend Server URL</label>
+                    <input type="text" class="keyword-input" id="backend-url-input" placeholder="https://your-backend.onrender.com" style="font-family: monospace;">
+                </div>
+                
+                <button class="generate-btn" onclick="saveBackendUrl()" style="margin-bottom: 10px;">💾 Save Backend URL</button>
+                
+                <div style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 8px; margin-top: 15px; border: 1px solid var(--silver-mid);">
+                    <p style="color: var(--neon-cyan); font-family: 'Orbitron', sans-serif; font-size: 0.8rem; margin-bottom: 10px;">🆓 FREE BACKEND HOSTING</p>
+                    <ul style="color: var(--silver-bright); font-size: 0.8rem; line-height: 1.8; margin-left: 20px;">
+                        <li><a href="https://render.com" target="_blank" style="color: var(--neon-cyan);">Render.com</a> - Free tier available</li>
+                        <li><a href="https://railway.app" target="_blank" style="color: var(--neon-cyan);">Railway.app</a> - Free tier available</li>
+                        <li><a href="https://fly.io" target="_blank" style="color: var(--neon-cyan);">Fly.io</a> - Free tier available</li>
+                    </ul>
+                </div>
+                
+                <div style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 8px; margin-top: 15px; border: 1px solid var(--silver-mid);">
+                    <p style="color: var(--neon-green); font-family: 'Orbitron', sans-serif; font-size: 0.8rem; margin-bottom: 10px;">🔑 GET FREE GEMINI API KEY</p>
+                    <ol style="color: var(--silver-bright); font-size: 0.8rem; line-height: 1.8; margin-left: 20px;">
+                        <li>Go to <a href="https://makersuite.google.com/app/apikey" target="_blank" style="color: var(--neon-cyan);">Google AI Studio</a></li>
+                        <li>Sign in with Google</li>
+                        <li>Click "Create API Key"</li>
+                        <li>Copy and add to your backend</li>
+                    </ol>
+                </div>
+                
+                <div id="backend-status" style="margin-top: 15px; padding: 12px; border-radius: 8px; font-family: 'Orbitron', sans-serif; font-size: 0.75rem; text-align: center;">
+                    <!-- Status will be shown here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         // ============================================
         // STATE MANAGEMENT
@@ -2578,10 +2626,36 @@
             }
         }
 
-        // Backend server URL - change this to your server address
-        const API_BASE_URL = window.location.hostname === 'localhost' 
-            ? 'http://localhost:3000' 
-            : ''; // Use same origin for deployed version
+        // ============================================
+        // BACKEND CONFIGURATION
+        // ============================================
+        // For GitHub Pages: Set this to your deployed backend URL
+        // Example: 'https://your-backend.onrender.com'
+        // 
+        // For local development: Uses localhost:3000
+        //
+        // Get FREE backend hosting at:
+        // - Render: https://render.com (recommended)
+        // - Railway: https://railway.app
+        // - Fly.io: https://fly.io
+        
+        const API_BASE_URL = (() => {
+            // Check if running on localhost
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                return 'http://localhost:3000';
+            }
+            
+            // For GitHub Pages - UPDATE THIS with your backend URL!
+            // Leave empty '' to use template mode only (no AI)
+            // Or set your deployed backend URL
+            return localStorage.getItem('backendUrl') || '';
+        })();
+        
+        // Function to set custom backend URL
+        function setBackendUrl(url) {
+            localStorage.setItem('backendUrl', url);
+            showNotification('Backend URL saved! Reload to apply.');
+        }
 
         async function callOpenAI(type, params) {
             const prompt = buildAIPrompt(type, params);
@@ -3987,6 +4061,65 @@
         function showShortcuts() {
             const modal = document.getElementById('shortcutsModal');
             modal.classList.toggle('active');
+        }
+
+        // ============================================
+        // BACKEND SETTINGS MODAL
+        // ============================================
+        function showBackendModal() {
+            const modal = document.getElementById('backendModal');
+            const input = document.getElementById('backend-url-input');
+            const statusDiv = document.getElementById('backend-status');
+            
+            // Load saved URL
+            const savedUrl = localStorage.getItem('backendUrl') || '';
+            input.value = savedUrl;
+            
+            // Update status
+            updateBackendStatus(statusDiv);
+            
+            modal.classList.toggle('active');
+        }
+        
+        function saveBackendUrl() {
+            const input = document.getElementById('backend-url-input');
+            const url = input.value.trim();
+            
+            if (url) {
+                // Remove trailing slash
+                const cleanUrl = url.replace(/\/$/, '');
+                localStorage.setItem('backendUrl', cleanUrl);
+                showNotification('Backend URL saved! Reload page to apply.');
+                
+                // Update status
+                const statusDiv = document.getElementById('backend-status');
+                updateBackendStatus(statusDiv);
+            } else {
+                localStorage.removeItem('backendUrl');
+                showNotification('Backend URL cleared. Using template mode only.');
+            }
+        }
+        
+        function updateBackendStatus(statusDiv) {
+            const savedUrl = localStorage.getItem('backendUrl');
+            const isLocalhost = window.location.hostname === 'localhost';
+            
+            if (isLocalhost) {
+                statusDiv.style.background = 'rgba(0, 255, 157, 0.15)';
+                statusDiv.style.border = '1px solid var(--neon-green)';
+                statusDiv.style.color = 'var(--neon-green)';
+                statusDiv.innerHTML = '✅ Using localhost:3000 (local development)';
+            } else if (savedUrl) {
+                statusDiv.style.background = 'rgba(0, 168, 255, 0.15)';
+                statusDiv.style.border = '1px solid var(--neon-blue)';
+                statusDiv.style.color = 'var(--neon-blue)';
+                statusDiv.innerHTML = `🔗 Connected to: ${savedUrl}`;
+            } else {
+                statusDiv.style.background = 'rgba(255, 170, 0, 0.15)';
+                statusDiv.style.border = '1px solid var(--neon-amber)';
+                statusDiv.style.color = 'var(--neon-amber)';
+                statusDiv.innerHTML = '⚠️ No backend configured. AI features will use templates only.';
+            }
         }
 
         // ============================================
