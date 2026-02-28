@@ -1,0 +1,5 @@
+# OpenAI API Key - Get from https://platform.openai.com/api-keys
+OPENAI_API_KEY=sk-your-api-key-here
+
+# Optional: Set port
+PORT=3000
