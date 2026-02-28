@@ -6,7 +6,7 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// CORS - Allow GitHub Pages
+// Allow all origins
 app.use(cors({
     origin: '*',
     credentials: true
