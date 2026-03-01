@@ -6,27 +6,70 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+// ==========================================
+// MIDDLEWARE
+// ==========================================
+app.use(cors({
+    origin: '*', // Allow all origins for now
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+app.use(express.json({ limit: '10mb' }));
 
-// Health check endpoint
+// ==========================================
+// ROUTES
+// ==========================================
+
+// Root route - fix for "Cannot GET /"
+app.get('/', (req, res) => {
+    res.json({
+        status: '✅ Prompt Lab API is running',
+        version: '1.0.0',
+        endpoints: {
+            health: '/api/health',
+            generate: 'POST /api/generate'
+        },
+        providers: ['gemini', 'openai', 'ollama', 'template']
+    });
+});
+
+// Health check
 app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', message: 'Prompt Lab API is running' });
+    res.json({ 
+        status: 'ok', 
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime()
+    });
+});
+
+// Test endpoint
+app.get('/api/test', (req, res) => {
+    res.json({ message: 'Backend is working!' });
 });
 
 // ==========================================
 // MAIN AI GENERATION ENDPOINT
 // ==========================================
 app.post('/api/generate', async (req, res) => {
+    console.log('📥 Received request:', req.body);
+    
     try {
         const { type, params, provider } = req.body;
         
-        console.log(`Generating ${type} with ${provider}...`);
+        if (!type || !params) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Missing required fields: type, params' 
+            });
+        }
         
-        // If template-only mode, return null to trigger fallback
-        if (provider === 'template') {
-            return res.json({ success: false, message: 'Template mode - use frontend fallback' });
+        // Template mode - return error to trigger frontend fallback
+        if (!provider || provider === 'template') {
+            return res.json({ 
+                success: false, 
+                message: 'Template mode - use frontend fallback',
+                useFallback: true
+            });
         }
         
         let result;
@@ -42,28 +85,34 @@ app.post('/api/generate', async (req, res) => {
                 result = await generateWithOllama(type, params);
                 break;
             default:
-                return res.status(400).json({ success: false, error: 'Unknown provider' });
+                return res.status(400).json({ 
+                    success: false, 
+                    error: `Unknown provider: ${provider}` 
+                });
         }
         
+        console.log('✅ Generation successful');
         res.json({ success: true, prompt: result });
         
     } catch (error) {
-        console.error('Generation error:', error);
+        console.error('❌ Generation error:', error.message);
         res.status(500).json({ 
             success: false, 
-            error: error.message || 'Internal server error' 
+            error: error.message || 'Internal server error',
+            useFallback: true
         });
     }
 });
 
 // ==========================================
-// GEMINI (GOOGLE AI) - FREE TIER
+// AI PROVIDERS
 // ==========================================
+
 async function generateWithGemini(type, params) {
     const apiKey = process.env.GEMINI_API_KEY;
     
     if (!apiKey) {
-        throw new Error('GEMINI_API_KEY not configured');
+        throw new Error('GEMINI_API_KEY not configured in environment variables');
     }
     
     const prompt = buildPrompt(type, params);
@@ -77,20 +126,23 @@ async function generateWithGemini(type, params) {
                 }]
             },
             {
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
+                timeout: 30000
             }
         );
+        
+        if (!response.data.candidates || !response.data.candidates[0]) {
+            throw new Error('No response from Gemini API');
+        }
         
         return response.data.candidates[0].content.parts[0].text;
     } catch (error) {
         console.error('Gemini API error:', error.response?.data || error.message);
-        throw new Error('Gemini API failed: ' + (error.response?.data?.error?.message || error.message));
+        const errorMsg = error.response?.data?.error?.message || error.message;
+        throw new Error(`Gemini API failed: ${errorMsg}`);
     }
 }
 
-// ==========================================
-// OPENAI (GPT)
-// ==========================================
 async function generateWithOpenAI(type, params) {
     const apiKey = process.env.OPENAI_API_KEY;
     
@@ -116,7 +168,8 @@ async function generateWithOpenAI(type, params) {
                 headers: {
                     'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
-                }
+                },
+                timeout: 30000
             }
         );
         
@@ -127,9 +180,6 @@ async function generateWithOpenAI(type, params) {
     }
 }
 
-// ==========================================
-// OLLAMA (LOCAL)
-// ==========================================
 async function generateWithOllama(type, params) {
     const ollamaUrl = process.env.OLLAMA_URL || 'http://localhost:11434';
     const prompt = buildPrompt(type, params);
@@ -150,7 +200,6 @@ async function generateWithOllama(type, params) {
         
         return response.data.response;
     } catch (error) {
-        console.error('Ollama error:', error.message);
         throw new Error('Ollama connection failed. Is Ollama running locally?');
     }
 }
@@ -215,14 +264,27 @@ app.use((err, req, res, next) => {
     console.error('Server error:', err);
     res.status(500).json({ 
         success: false, 
-        error: 'Internal server error' 
+        error: 'Internal server error',
+        message: err.message
     });
 });
 
-// Start server
-app.listen(PORT, () => {
+// 404 handler
+app.use((req, res) => {
+    res.status(404).json({ 
+        success: false, 
+        error: 'Endpoint not found',
+        available: ['GET /', 'GET /api/health', 'POST /api/generate']
+    });
+});
+
+// ==========================================
+// START SERVER
+// ==========================================
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Prompt Lab Server running on port ${PORT}`);
     console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🔗 URL: http://localhost:${PORT}`);
     console.log(`🤖 Gemini API: ${process.env.GEMINI_API_KEY ? '✅ Configured' : '❌ Not configured'}`);
     console.log(`🧠 OpenAI API: ${process.env.OPENAI_API_KEY ? '✅ Configured' : '❌ Not configured'}`);
 });
