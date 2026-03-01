@@ -1,6 +1,3 @@
-// AI Prompt Lab Backend Server
-// This keeps your API keys secure on the server side
-
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -9,193 +6,223 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware - CORS configuration
-const allowedOrigins = [
-    'http://localhost:3000',
-    'http://localhost:8080',
-    'http://127.0.0.1:5500',  // Live Server
-    // Add your GitHub Pages URL here after deployment:
-    // 'https://yourusername.github.io'
-];
-
-// Allow all origins in development, specific in production
-app.use(cors({
-    origin: function(origin, callback) {
-        // Allow requests with no origin (mobile apps, curl, etc.)
-        if (!origin) return callback(null, true);
-        
-        // Allow localhost and GitHub Pages
-        if (allowedOrigins.includes(origin) || 
-            origin.includes('localhost') || 
-            origin.includes('127.0.0.1') ||
-            origin.endsWith('.github.io')) {
-            return callback(null, true);
-        }
-        
-        callback(new Error('Not allowed by CORS'));
-    },
-    credentials: true
-}));
-
+// Middleware
+app.use(cors());
 app.use(express.json());
 
-// Health check
-app.get('/', (req, res) => {
-    res.json({ status: 'AI Prompt Lab Server Running', version: '1.0.0' });
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', message: 'Prompt Lab API is running' });
 });
 
-// ============================================
-// GEMINI API ENDPOINT (FREE)
-// ============================================
-app.post('/api/gemini', async (req, res) => {
+// ==========================================
+// MAIN AI GENERATION ENDPOINT
+// ==========================================
+app.post('/api/generate', async (req, res) => {
     try {
-        const { prompt, type } = req.body;
+        const { type, params, provider } = req.body;
         
-        if (!process.env.GEMINI_API_KEY) {
-            return res.status(500).json({ error: 'Gemini API key not configured on server' });
+        console.log(`Generating ${type} with ${provider}...`);
+        
+        // If template-only mode, return null to trigger fallback
+        if (provider === 'template') {
+            return res.json({ success: false, message: 'Template mode - use frontend fallback' });
         }
-
-        const systemPrompts = {
-            music: 'You are an expert music producer. Create detailed, creative prompts for AI music generation tools like Suno or Udio.',
-            lyrics: 'You are a professional songwriter. Write compelling, original lyrics with proper structure.',
-            image: 'You are an AI image generation expert. Create detailed prompts for Midjourney, DALL-E, or Stable Diffusion.',
-            video: 'You are an AI video generation expert. Create detailed prompts for Runway, Pika, or Sora.',
-            education: 'You are an experienced educator. Create engaging, accurate educational content.',
-            esl: 'You are an ESL expert. Create effective language learning materials.',
-            keywords: 'You are a prompt engineering specialist. Create optimized AI prompts.'
-        };
-
-        const response = await axios.post(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${process.env.GEMINI_API_KEY}`,
-            {
-                contents: [{
-                    role: 'user',
-                    parts: [
-                        { text: systemPrompts[type] || systemPrompts.keywords },
-                        { text: `Now generate based on this request: ${prompt}` }
-                    ]
-                }],
-                generationConfig: {
-                    temperature: 0.8,
-                    maxOutputTokens: 1500,
-                    topP: 0.9
-                }
-            }
-        );
-
-        const generatedText = response.data.candidates[0].content.parts[0].text;
-        res.json({ success: true, result: generatedText });
-
+        
+        let result;
+        
+        switch(provider) {
+            case 'gemini':
+                result = await generateWithGemini(type, params);
+                break;
+            case 'openai':
+                result = await generateWithOpenAI(type, params);
+                break;
+            case 'ollama':
+                result = await generateWithOllama(type, params);
+                break;
+            default:
+                return res.status(400).json({ success: false, error: 'Unknown provider' });
+        }
+        
+        res.json({ success: true, prompt: result });
+        
     } catch (error) {
-        console.error('Gemini API Error:', error.response?.data || error.message);
+        console.error('Generation error:', error);
         res.status(500).json({ 
-            error: 'Gemini API error', 
-            details: error.response?.data?.error?.message || error.message 
+            success: false, 
+            error: error.message || 'Internal server error' 
         });
     }
 });
 
-// ============================================
-// OPENAI API ENDPOINT
-// ============================================
-app.post('/api/openai', async (req, res) => {
+// ==========================================
+// GEMINI (GOOGLE AI) - FREE TIER
+// ==========================================
+async function generateWithGemini(type, params) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    
+    if (!apiKey) {
+        throw new Error('GEMINI_API_KEY not configured');
+    }
+    
+    const prompt = buildPrompt(type, params);
+    
     try {
-        const { prompt, type } = req.body;
+        const response = await axios.post(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+            {
+                contents: [{
+                    parts: [{ text: prompt }]
+                }]
+            },
+            {
+                headers: { 'Content-Type': 'application/json' }
+            }
+        );
         
-        if (!process.env.OPENAI_API_KEY) {
-            return res.status(500).json({ error: 'OpenAI API key not configured on server' });
-        }
+        return response.data.candidates[0].content.parts[0].text;
+    } catch (error) {
+        console.error('Gemini API error:', error.response?.data || error.message);
+        throw new Error('Gemini API failed: ' + (error.response?.data?.error?.message || error.message));
+    }
+}
 
-        const systemPrompts = {
-            music: 'You are an expert music producer. Create detailed, creative prompts for AI music generation tools like Suno or Udio.',
-            lyrics: 'You are a professional songwriter. Write compelling, original lyrics with proper structure.',
-            image: 'You are an AI image generation expert. Create detailed prompts for Midjourney, DALL-E, or Stable Diffusion.',
-            video: 'You are an AI video generation expert. Create detailed prompts for Runway, Pika, or Sora.',
-            education: 'You are an experienced educator. Create engaging, accurate educational content.',
-            esl: 'You are an ESL expert. Create effective language learning materials.',
-            keywords: 'You are a prompt engineering specialist. Create optimized AI prompts.'
-        };
-
+// ==========================================
+// OPENAI (GPT)
+// ==========================================
+async function generateWithOpenAI(type, params) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    
+    if (!apiKey) {
+        throw new Error('OPENAI_API_KEY not configured');
+    }
+    
+    const prompt = buildPrompt(type, params);
+    
+    try {
         const response = await axios.post(
             'https://api.openai.com/v1/chat/completions',
             {
                 model: 'gpt-3.5-turbo',
                 messages: [
-                    { role: 'system', content: systemPrompts[type] || systemPrompts.keywords },
+                    { role: 'system', content: 'You are an expert prompt engineer.' },
                     { role: 'user', content: prompt }
                 ],
                 temperature: 0.8,
-                max_tokens: 1500
+                max_tokens: 1000
             },
             {
                 headers: {
-                    'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+                    'Authorization': `Bearer ${apiKey}`,
                     'Content-Type': 'application/json'
                 }
             }
         );
-
-        const generatedText = response.data.choices[0].message.content;
-        res.json({ success: true, result: generatedText });
-
+        
+        return response.data.choices[0].message.content;
     } catch (error) {
-        console.error('OpenAI API Error:', error.response?.data || error.message);
-        res.status(500).json({ 
-            error: 'OpenAI API error', 
-            details: error.response?.data?.error?.message || error.message 
-        });
+        console.error('OpenAI API error:', error.response?.data || error.message);
+        throw new Error('OpenAI API failed: ' + (error.response?.data?.error?.message || error.message));
     }
-});
+}
 
-// ============================================
-// OLLAMA (LOCAL AI) ENDPOINT
-// ============================================
-app.post('/api/ollama', async (req, res) => {
+// ==========================================
+// OLLAMA (LOCAL)
+// ==========================================
+async function generateWithOllama(type, params) {
+    const ollamaUrl = process.env.OLLAMA_URL || 'http://localhost:11434';
+    const prompt = buildPrompt(type, params);
+    
     try {
-        const { prompt, type } = req.body;
-
-        const systemPrompts = {
-            music: 'You are an expert music producer. Create detailed, creative prompts for AI music generation.',
-            lyrics: 'You are a professional songwriter. Write compelling, original lyrics.',
-            image: 'You are an AI image generation expert. Create detailed prompts.',
-            video: 'You are an AI video generation expert. Create detailed prompts.',
-            education: 'You are an experienced educator. Create engaging educational content.',
-            esl: 'You are an ESL expert. Create effective language learning materials.',
-            keywords: 'You are a prompt engineering specialist.'
-        };
-
         const response = await axios.post(
-            'http://localhost:11434/api/generate',
+            `${ollamaUrl}/api/generate`,
             {
-                model: 'mistral',
-                prompt: `${systemPrompts[type] || systemPrompts.keywords}\n\n${prompt}`,
+                model: process.env.OLLAMA_MODEL || 'llama2',
+                prompt: prompt,
                 stream: false
+            },
+            {
+                headers: { 'Content-Type': 'application/json' },
+                timeout: 60000
             }
         );
-
-        res.json({ success: true, result: response.data.response });
-
+        
+        return response.data.response;
     } catch (error) {
-        console.error('Ollama Error:', error.message);
-        res.status(500).json({ 
-            error: 'Ollama not running', 
-            details: 'Make sure Ollama is installed and running on localhost:11434' 
-        });
+        console.error('Ollama error:', error.message);
+        throw new Error('Ollama connection failed. Is Ollama running locally?');
     }
+}
+
+// ==========================================
+// PROMPT BUILDERS
+// ==========================================
+function buildPrompt(type, params) {
+    const builders = {
+        music: (p) => `Create a detailed AI music generation prompt for ${p.genre} genre.
+BPM: ${p.bpm}, Mood: ${p.mood}
+Keywords: ${p.keywords || 'none'}
+Make it suitable for Suno, Udio, or similar AI music tools. Include specific instructions about instruments, structure, and atmosphere.`,
+
+        lyrics: (p) => `Write song lyrics in ${p.genre} style.
+Topic: ${p.topic || 'general theme'}
+Mood: ${p.mood}, Structure: ${p.structure}
+Keywords to include: ${p.keywords || 'none'}
+Include verses, chorus, and bridge. Make it emotionally resonant.`,
+
+        image: (p) => `Create an optimized AI image generation prompt.
+Style: ${p.style}
+Subject: ${p.subject || 'creative composition'}
+Lighting: ${p.lighting}, Ratio: ${p.ratio}
+Make it detailed for Midjourney, DALL-E 3, or Stable Diffusion.`,
+
+        video: (p) => `Create a detailed AI video generation prompt for Runway, Pika, or similar.
+Style: ${p.style}
+Subject: ${p.subject || 'cinematic scene'}
+Camera: ${p.camera || 'various shots'}, Mood: ${p.mood}
+Duration: ${p.duration}s, Quality: ${p.quality}
+Include camera movements and visual details.`,
+
+        education: (p) => `Create educational content.
+Type: ${p.type}, Topic: ${p.topic || 'general subject'}
+Level: ${p.level}, Tone: ${p.tone}
+Make it structured and engaging for students.`,
+
+        esl: (p) => `Create ESL (English as Second Language) learning material.
+Proficiency: ${p.proficiency}, Content Type: ${p.contentType}
+Native Language: ${p.nativeLang}, Focus: ${p.focus}
+Context: ${p.context || 'general'}
+Include translations or explanations where helpful.`,
+
+        keywords: (p) => `Optimize this prompt for AI tools:
+Topic: ${p.topic}
+Keywords: ${p.keywords || 'none'}
+Style: ${p.style}, Length: ${p.length}
+Make it detailed and effective for getting best results from AI.`
+    };
+    
+    const builder = builders[type];
+    if (!builder) throw new Error(`Unknown prompt type: ${type}`);
+    
+    return builder(params);
+}
+
+// ==========================================
+// ERROR HANDLING
+// ==========================================
+app.use((err, req, res, next) => {
+    console.error('Server error:', err);
+    res.status(500).json({ 
+        success: false, 
+        error: 'Internal server error' 
+    });
 });
 
-// ============================================
-// START SERVER
-// ============================================
+// Start server
 app.listen(PORT, () => {
-    console.log(`🚀 AI Prompt Lab Server running on http://localhost:${PORT}`);
-    console.log('');
-    console.log('📋 Available endpoints:');
-    console.log('  POST /api/gemini  - Google Gemini (Free)');
-    console.log('  POST /api/openai  - OpenAI GPT');
-    console.log('  POST /api/ollama  - Local Ollama');
-    console.log('');
-    console.log('🔑 Environment variables needed:');
-    console.log('  GEMINI_API_KEY - Get free at https://makersuite.google.com');
-    console.log('  OPENAI_API_KEY - Get at https://platform.openai.com');
+    console.log(`🚀 Prompt Lab Server running on port ${PORT}`);
+    console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🤖 Gemini API: ${process.env.GEMINI_API_KEY ? '✅ Configured' : '❌ Not configured'}`);
+    console.log(`🧠 OpenAI API: ${process.env.OPENAI_API_KEY ? '✅ Configured' : '❌ Not configured'}`);
 });
