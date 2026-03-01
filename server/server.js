@@ -4,13 +4,18 @@ const axios = require('axios');
 require('dotenv').config();
 
 const app = express();
+
+// ==========================================
+// PORT CONFIGURATION - CRITICAL FOR RENDER
+// ==========================================
 const PORT = process.env.PORT || 3000;
+const HOST = '0.0.0.0'; // MUST bind to all interfaces for Render
 
 // ==========================================
 // MIDDLEWARE
 // ==========================================
 app.use(cors({
-    origin: '*', // Allow all origins for now
+    origin: '*',
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
@@ -20,16 +25,16 @@ app.use(express.json({ limit: '10mb' }));
 // ROUTES
 // ==========================================
 
-// Root route - fix for "Cannot GET /"
+// Root route
 app.get('/', (req, res) => {
     res.json({
         status: '✅ Prompt Lab API is running',
         version: '1.0.0',
+        port: PORT,
         endpoints: {
             health: '/api/health',
             generate: 'POST /api/generate'
-        },
-        providers: ['gemini', 'openai', 'ollama', 'template']
+        }
     });
 });
 
@@ -38,13 +43,13 @@ app.get('/api/health', (req, res) => {
     res.json({ 
         status: 'ok', 
         timestamp: new Date().toISOString(),
-        uptime: process.uptime()
+        port: PORT
     });
 });
 
 // Test endpoint
 app.get('/api/test', (req, res) => {
-    res.json({ message: 'Backend is working!' });
+    res.json({ message: 'Backend is working!', port: PORT });
 });
 
 // ==========================================
@@ -63,7 +68,7 @@ app.post('/api/generate', async (req, res) => {
             });
         }
         
-        // Template mode - return error to trigger frontend fallback
+        // Template mode - return fallback flag
         if (!provider || provider === 'template') {
             return res.json({ 
                 success: false, 
@@ -81,9 +86,6 @@ app.post('/api/generate', async (req, res) => {
             case 'openai':
                 result = await generateWithOpenAI(type, params);
                 break;
-            case 'ollama':
-                result = await generateWithOllama(type, params);
-                break;
             default:
                 return res.status(400).json({ 
                     success: false, 
@@ -96,9 +98,9 @@ app.post('/api/generate', async (req, res) => {
         
     } catch (error) {
         console.error('❌ Generation error:', error.message);
-        res.status(500).json({ 
+        res.json({ 
             success: false, 
-            error: error.message || 'Internal server error',
+            error: error.message,
             useFallback: true
         });
     }
@@ -112,7 +114,7 @@ async function generateWithGemini(type, params) {
     const apiKey = process.env.GEMINI_API_KEY;
     
     if (!apiKey) {
-        throw new Error('GEMINI_API_KEY not configured in environment variables');
+        throw new Error('GEMINI_API_KEY not configured');
     }
     
     const prompt = buildPrompt(type, params);
@@ -138,8 +140,7 @@ async function generateWithGemini(type, params) {
         return response.data.candidates[0].content.parts[0].text;
     } catch (error) {
         console.error('Gemini API error:', error.response?.data || error.message);
-        const errorMsg = error.response?.data?.error?.message || error.message;
-        throw new Error(`Gemini API failed: ${errorMsg}`);
+        throw new Error('Gemini API failed: ' + (error.response?.data?.error?.message || error.message));
     }
 }
 
@@ -180,111 +181,72 @@ async function generateWithOpenAI(type, params) {
     }
 }
 
-async function generateWithOllama(type, params) {
-    const ollamaUrl = process.env.OLLAMA_URL || 'http://localhost:11434';
-    const prompt = buildPrompt(type, params);
-    
-    try {
-        const response = await axios.post(
-            `${ollamaUrl}/api/generate`,
-            {
-                model: process.env.OLLAMA_MODEL || 'llama2',
-                prompt: prompt,
-                stream: false
-            },
-            {
-                headers: { 'Content-Type': 'application/json' },
-                timeout: 60000
-            }
-        );
-        
-        return response.data.response;
-    } catch (error) {
-        throw new Error('Ollama connection failed. Is Ollama running locally?');
-    }
-}
-
-// ==========================================
-// PROMPT BUILDERS
-// ==========================================
 function buildPrompt(type, params) {
     const builders = {
         music: (p) => `Create a detailed AI music generation prompt for ${p.genre} genre.
 BPM: ${p.bpm}, Mood: ${p.mood}
 Keywords: ${p.keywords || 'none'}
-Make it suitable for Suno, Udio, or similar AI music tools. Include specific instructions about instruments, structure, and atmosphere.`,
+Make it suitable for Suno, Udio, or similar AI music tools.`,
 
         lyrics: (p) => `Write song lyrics in ${p.genre} style.
 Topic: ${p.topic || 'general theme'}
 Mood: ${p.mood}, Structure: ${p.structure}
-Keywords to include: ${p.keywords || 'none'}
-Include verses, chorus, and bridge. Make it emotionally resonant.`,
+Keywords: ${p.keywords || 'none'}`,
 
         image: (p) => `Create an optimized AI image generation prompt.
 Style: ${p.style}
 Subject: ${p.subject || 'creative composition'}
-Lighting: ${p.lighting}, Ratio: ${p.ratio}
-Make it detailed for Midjourney, DALL-E 3, or Stable Diffusion.`,
+Lighting: ${p.lighting}, Ratio: ${p.ratio}`,
 
-        video: (p) => `Create a detailed AI video generation prompt for Runway, Pika, or similar.
+        video: (p) => `Create a detailed AI video generation prompt.
 Style: ${p.style}
 Subject: ${p.subject || 'cinematic scene'}
-Camera: ${p.camera || 'various shots'}, Mood: ${p.mood}
-Duration: ${p.duration}s, Quality: ${p.quality}
-Include camera movements and visual details.`,
+Camera: ${p.camera || 'various shots'}, Mood: ${p.mood}`,
 
         education: (p) => `Create educational content.
 Type: ${p.type}, Topic: ${p.topic || 'general subject'}
-Level: ${p.level}, Tone: ${p.tone}
-Make it structured and engaging for students.`,
+Level: ${p.level}, Tone: ${p.tone}`,
 
-        esl: (p) => `Create ESL (English as Second Language) learning material.
+        esl: (p) => `Create ESL learning material.
 Proficiency: ${p.proficiency}, Content Type: ${p.contentType}
-Native Language: ${p.nativeLang}, Focus: ${p.focus}
-Context: ${p.context || 'general'}
-Include translations or explanations where helpful.`,
+Native Language: ${p.nativeLang}, Focus: ${p.focus}`,
 
         keywords: (p) => `Optimize this prompt for AI tools:
 Topic: ${p.topic}
 Keywords: ${p.keywords || 'none'}
-Style: ${p.style}, Length: ${p.length}
-Make it detailed and effective for getting best results from AI.`
+Style: ${p.style}, Length: ${p.length}`
     };
     
     const builder = builders[type];
-    if (!builder) throw new Error(`Unknown prompt type: ${type}`);
-    
+    if (!builder) throw new Error(`Unknown type: ${type}`);
     return builder(params);
 }
 
 // ==========================================
 // ERROR HANDLING
 // ==========================================
-app.use((err, req, res, next) => {
-    console.error('Server error:', err);
-    res.status(500).json({ 
-        success: false, 
-        error: 'Internal server error',
-        message: err.message
-    });
-});
 
 // 404 handler
 app.use((req, res) => {
     res.status(404).json({ 
         success: false, 
-        error: 'Endpoint not found',
-        available: ['GET /', 'GET /api/health', 'POST /api/generate']
+        error: 'Not found',
+        path: req.path
     });
 });
 
+// Global error handler
+app.use((err, req, res, next) => {
+    console.error('Server error:', err);
+    res.status(500).json({ success: false, error: err.message });
+});
+
 // ==========================================
-// START SERVER
+// START SERVER - CRITICAL PORT BINDING
 // ==========================================
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Prompt Lab Server running on port ${PORT}`);
-    console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`🔗 URL: http://localhost:${PORT}`);
+app.listen(PORT, HOST, () => {
+    console.log(`🚀 Server running on http://${HOST}:${PORT}`);
+    console.log(`📡 Environment PORT: ${process.env.PORT || 'not set (using default 3000)'}`);
     console.log(`🤖 Gemini API: ${process.env.GEMINI_API_KEY ? '✅ Configured' : '❌ Not configured'}`);
     console.log(`🧠 OpenAI API: ${process.env.OPENAI_API_KEY ? '✅ Configured' : '❌ Not configured'}`);
 });
