@@ -8,7 +8,7 @@ const app = express();
 // ==========================================
 // PORT CONFIGURATION - CRITICAL FOR RENDER
 // ==========================================
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 const HOST = '0.0.0.0'; // MUST bind to all interfaces for Render
 
 // ==========================================
